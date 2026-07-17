@@ -1,11 +1,3 @@
-"""Worker process entrypoint.
-
-Empty on purpose for now, this just proves the worker container starts,
-can reach Redis, and logs properly. Phase 2 replaces the loop body with
-real event consumption for the ingestion pipeline (idempotency check,
-parse, chunk, embed, store).
-"""
-
 import asyncio
 
 from deepequity.core.config import get_settings
@@ -15,6 +7,9 @@ from deepequity.core.redis_client import close_redis_pool, get_redis
 HEARTBEAT_SECONDS = 30
 
 
+#empty loop on purpose for now, this just proves the worker container starts, can reach
+#redis, and logs properly. phase 2 replaces the loop body with real event consumption for
+#the ingestion pipeline (idempotency check, parse, chunk, embed, store)
 async def run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -32,6 +27,7 @@ async def run() -> None:
         await close_redis_pool()
 
 
+#sync entrypoint docker's CMD calls, just kicks off the async loop above
 def main() -> None:
     asyncio.run(run())
 

@@ -1,9 +1,3 @@
-"""One shared async Redis connection pool for the whole app.
-
-FastAPI creates this once at startup and reuses it for every request, rather
-than opening a new connection every time someone hits an endpoint.
-"""
-
 from redis.asyncio import ConnectionPool, Redis
 
 from deepequity.core.config import get_settings
@@ -11,6 +5,8 @@ from deepequity.core.config import get_settings
 _pool: ConnectionPool | None = None
 
 
+#builds the one shared connection pool the first time anything asks for it, then just
+#hands back the same pool after that. avoids opening a fresh connection per request
 def get_redis_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
@@ -18,10 +14,12 @@ def get_redis_pool() -> ConnectionPool:
     return _pool
 
 
+#gives you a redis client backed by the shared pool, this is what the rest of the app calls
 def get_redis() -> Redis:
     return Redis(connection_pool=get_redis_pool())
 
 
+#closes the pool on shutdown so we don't leave connections hanging around
 async def close_redis_pool() -> None:
     global _pool
     if _pool is not None:

@@ -1,11 +1,3 @@
-"""JWT auth for the API.
-
-Anything that isn't a health check needs a valid bearer token. We don't issue
-tokens from this service in Phase 1, that comes with real user accounts
-later, for now this just proves the middleware/dependency actually rejects
-bad tokens, which is the thing interviewers ask about.
-"""
-
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -18,6 +10,9 @@ from deepequity.core.config import get_settings
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
+#builds a signed jwt for the given subject. we don't issue tokens from this service yet
+#(that comes with real user accounts later), this exists so we can prove the auth checks
+#actually work end to end
 def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
     settings = get_settings()
     expire = datetime.now(UTC) + timedelta(
@@ -27,6 +22,8 @@ def create_access_token(subject: str, expires_minutes: int | None = None) -> str
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+#verifies the token's signature and expiry, raises a proper 401 instead of letting the
+#raw jwt exception bubble up if it's expired or just garbage
 def decode_access_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     try:
@@ -41,6 +38,8 @@ def decode_access_token(token: str) -> dict[str, Any]:
         ) from exc
 
 
+#fastapi dependency you drop on any route that needs a logged-in caller. 401s if there's
+#no bearer token at all, otherwise hands off to decode_access_token for the real check
 async def require_auth(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
 ) -> dict[str, Any]:

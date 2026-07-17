@@ -1,11 +1,3 @@
-"""Health and readiness endpoints.
-
-These two mean different things. `/health` just says "the process is alive",
-Docker/Kubernetes use it to decide whether to restart the container.
-`/ready` actually checks the things the app depends on (Redis, Postgres),
-and traffic should not get routed here until it returns 200.
-"""
-
 import psycopg
 from fastapi import APIRouter, Response, status
 
@@ -15,11 +7,15 @@ from deepequity.core.redis_client import get_redis
 router = APIRouter(tags=["health"])
 
 
+#just says the process is alive, docker/kubernetes use this to decide whether to restart
+#the container. doesn't check anything downstream on purpose
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+#actually checks the things the app depends on (redis, postgres). traffic shouldn't get
+#routed here until this returns 200, that's the difference from /health above
 @router.get("/ready")
 async def ready(response: Response) -> dict[str, str]:
     checks: dict[str, str] = {}

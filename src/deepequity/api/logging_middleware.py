@@ -1,11 +1,3 @@
-"""Attaches a request ID to every request, log lines, and the response.
-
-The request ID matters once things break in production: a user reports
-"my request failed", they give you the X-Request-ID from their error
-message, and you grep the logs for that exact string instead of guessing
-which of a thousand log lines belongs to them.
-"""
-
 import time
 import uuid
 
@@ -17,6 +9,10 @@ from starlette.responses import Response
 logger = structlog.get_logger("deepequity.request")
 
 
+#tags every request with an id and binds it to structlog's context, so every log line
+#for this request carries it. matters once things break in prod: a user reports "my
+#request failed", gives you the x-request-id from their error, and you grep for that
+#exact string instead of guessing which of a thousand log lines belongs to them
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint

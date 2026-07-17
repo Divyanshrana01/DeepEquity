@@ -1,15 +1,11 @@
-"""All the settings the app needs, pulled from environment variables.
-
-Using pydantic-settings here means we get validation for free: if REDIS_URL
-is missing or malformed, the app fails fast at startup instead of crashing
-later when something actually tries to use Redis.
-"""
-
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+#all the settings the app needs, pulled from environment variables. using pydantic-settings
+#means we get validation for free: if redis_url is missing or malformed, the app fails fast
+#at startup instead of crashing later when something actually tries to use redis.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -34,7 +30,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
 
+#cached so we build the Settings object once per process, not once per request
 @lru_cache
 def get_settings() -> Settings:
-    # Cached so we build the Settings object once per process, not once per request.
     return Settings()
