@@ -19,3 +19,8 @@ __pycache__/
 
 # Docker
 postgres_data/
+
+# Local-only notes, not for the repo
+Deep-Equity-plan.md
+Deep_Equity_Knowledge_Guide.pdf
+PROGRESS.md
