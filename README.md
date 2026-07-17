@@ -4,9 +4,6 @@ Multi-agent equity research desk. Give it a ticker, a bull agent and a bear agen
 sides of the thesis using the same evidence, and a synthesis agent writes a cited research note
 with a confidence breakdown.
 
-Full architecture and reasoning: [equity-research-desk-plan_2.md](equity-research-desk-plan_2.md).
-Plain-language change log: [PROGRESS.md](PROGRESS.md).
-
 ## Status
 
 Phase 1 (skeleton and infrastructure) in progress. `docker compose up` gives a running,

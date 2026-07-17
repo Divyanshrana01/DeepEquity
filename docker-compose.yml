@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: deepequity
+      POSTGRES_PASSWORD: deepequity
+      POSTGRES_DB: deepequity
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepequity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DSN: postgresql://deepequity:deepequity@postgres:5432/deepequity
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    command: ["python", "-m", "deepequity.worker.main"]
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DSN: postgresql://deepequity:deepequity@postgres:5432/deepequity
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    command: ["uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8001:8000"
+
+volumes:
+  postgres_data:
