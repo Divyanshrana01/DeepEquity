@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 60
     rate_limit_window_seconds: int = 60
 
+    # MCP server host/port (the container listens here for tool calls)
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 8000
+
+    # SEC EDGAR requires a User-Agent header with real contact info, they block
+    # requests without one. Format they ask for: "Sample Company AdminContact@example.com".
+    sec_user_agent: str = "DeepEquity research divyanshr141@gmail.com"
+
+    # NewsAPI.org key for fetch_news. Free tier works for dev, leave blank and the
+    # news tool will report it's not configured instead of crashing.
+    news_api_key: str = ""
+
 
 #cached so we build the Settings object once per process, not once per request
 @lru_cache
