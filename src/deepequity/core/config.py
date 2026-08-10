@@ -19,6 +19,12 @@ class Settings(BaseSettings):
 
     # Redis (rate limiting, caching, checkpoints)
     redis_url: str = "redis://localhost:6379/0"
+    # How long a single read from redis may take. This MUST stay comfortably above
+    # ingestion_block_ms below, because the worker's blocking stream read holds the
+    # socket open for that long on purpose. redis-py quietly defaults this to 5s, which
+    # is the same as our block duration, so without setting it here the worker's very
+    # first idle read times out and kills the process.
+    redis_socket_timeout: float = 30.0
 
     # JWT auth
     jwt_secret_key: str = "change-me-in-.env"
@@ -33,6 +39,49 @@ class Settings(BaseSettings):
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
 
+    # Where the api and worker reach the MCP server. Inside docker that's the service
+    # name, locally it's localhost on the mapped port.
+    mcp_server_url: str = "http://localhost:8001/mcp"
+
+    # The MCP SDK blocks requests whose Host header it doesn't recognise, which is what
+    # stops a malicious webpage from pointing your browser at a local MCP server (DNS
+    # rebinding). We keep that protection on and just name the hosts we actually serve:
+    # the docker service name for container-to-container calls, plus localhost for
+    # running things by hand. Comma separated so it can be set from one env var.
+    mcp_allowed_hosts: str = "mcp-server:8000,localhost:8001,127.0.0.1:8001"
+
+    # Ingestion retry policy. Transient failures get retried with an exponential backoff
+    # (1s, 4s, 16s with a base of 4), anything left over after this many tries goes to
+    # the dead letter queue.
+    ingestion_max_attempts: int = 3
+    ingestion_backoff_base_seconds: float = 4.0
+    # How long the worker parks on an empty queue before looping again. Keep this well
+    # under redis_socket_timeout, see the note there.
+    ingestion_block_ms: int = 5000
+    # How long a message must sit untouched before another worker is allowed to take it
+    # over. This is the crash recovery window: too short and we'd steal work from a
+    # worker that's just being slow, too long and a dead worker's documents sit idle.
+    ingestion_reclaim_idle_ms: int = 60_000
+
+    # Embeddings. fastembed runs the model on onnxruntime, so no pytorch in the image.
+    # If you change the model you must change embedding_dim to match and rebuild the
+    # chunks table, the vector column size is fixed at creation.
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = 384
+    # How many chunks to embed in one call. Bigger batches are faster but use more memory.
+    embedding_batch_size: int = 64
+
+    # Parent-child chunking. Children are what we search over (small, so a match is
+    # precise), parents are what we hand the LLM (big, so it gets enough context to
+    # actually use the match).
+    child_chunk_chars: int = 400
+    child_chunk_overlap_chars: int = 80
+    parent_chunk_chars: int = 2000
+
+    # Filings are megabytes of html. This is the ceiling on what the worker will pull
+    # down for one document, a guard against a pathological file eating all our memory.
+    max_document_bytes: int = 20_000_000
+
     # SEC EDGAR requires a User-Agent header with real contact info, they block
     # requests without one. Format they ask for: "Sample Company AdminContact@example.com".
     sec_user_agent: str = "DeepEquity research divyanshr141@gmail.com"
@@ -40,6 +89,11 @@ class Settings(BaseSettings):
     # NewsAPI.org key for fetch_news. Free tier works for dev, leave blank and the
     # news tool will report it's not configured instead of crashing.
     news_api_key: str = ""
+
+    #splits the comma separated host list into something the MCP server can use, and
+    #drops any stray whitespace so "a, b" works the same as "a,b"
+    def allowed_hosts(self) -> list[str]:
+        return [host.strip() for host in self.mcp_allowed_hosts.split(",") if host.strip()]
 
 
 #cached so we build the Settings object once per process, not once per request

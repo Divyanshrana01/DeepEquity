@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -17,7 +18,16 @@ from mcp_server.tools.transcripts import fetch_transcript as _fetch_transcript
 # The custom MCP server. Agents in later phases connect to this over HTTP and call the
 # four tools below instead of hitting SEC/yfinance/NewsAPI directly. stateless_http=True
 # means each tool call is independent with no session to track, which is all we need.
-mcp = FastMCP("deepequity-mcp", stateless_http=True)
+mcp = FastMCP(
+    "deepequity-mcp",
+    stateless_http=True,
+    #the sdk rejects requests whose Host header it doesn't know, which is what keeps a
+    #malicious page from aiming a browser at a local mcp server. we keep that on and
+    #name the hosts we really answer to, rather than switching the check off.
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=get_settings().allowed_hosts()
+    ),
+)
 
 
 # Each tool is registered as a thin async wrapper around the real implementation in

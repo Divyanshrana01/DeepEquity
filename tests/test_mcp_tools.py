@@ -178,6 +178,28 @@ async def test_fetch_news_returns_articles(monkeypatch: pytest.MonkeyPatch) -> N
     get_settings.cache_clear()
 
 
+# --- transport security -------------------------------------------------------------
+
+
+def test_allowed_hosts_parses_and_includes_docker_service() -> None:
+    # Regression guard: with the docker service name missing from this list the MCP
+    # server answers container-to-container calls with 421 Misdirected Request, which
+    # is exactly what broke the first live ingest run.
+    get_settings.cache_clear()
+    hosts = get_settings().allowed_hosts()
+
+    assert "mcp-server:8000" in hosts
+    assert all(host == host.strip() for host in hosts)
+
+
+def test_allowed_hosts_ignores_whitespace_and_blanks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "a:1, b:2 ,,")
+    get_settings.cache_clear()
+
+    assert get_settings().allowed_hosts() == ["a:1", "b:2"]
+    get_settings.cache_clear()
+
+
 # --- transcripts (stub) --------------------------------------------------------------
 
 

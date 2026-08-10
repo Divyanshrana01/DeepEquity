@@ -10,7 +10,15 @@ _pool: ConnectionPool | None = None
 def get_redis_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
-        _pool = ConnectionPool.from_url(get_settings().redis_url, decode_responses=True)
+        settings = get_settings()
+        #socket_timeout is set on purpose, not left to the library default. see the
+        #comment on the setting: the default is short enough to kill the worker's
+        #blocking stream read.
+        _pool = ConnectionPool.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_timeout=settings.redis_socket_timeout,
+        )
     return _pool
 
 

@@ -20,6 +20,13 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 
+# Download the embedding model at build time instead of on first use. Without this the
+# worker would stall for however long a 130MB download takes the first time it processes
+# a document, and a container with no internet access would never work at all.
+ENV FASTEMBED_CACHE_PATH=/app/.model_cache
+RUN python -c \
+    "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
+
 COPY README.md ./
 COPY src ./src
 COPY mcp_server ./mcp_server

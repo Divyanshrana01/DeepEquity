@@ -34,6 +34,7 @@ services:
     environment:
       POSTGRES_DSN: postgresql://deepequity:deepequity@postgres:5432/deepequity
       REDIS_URL: redis://redis:6379/0
+      MCP_SERVER_URL: http://mcp-server:8000/mcp
     ports:
       - "8000:8000"
     depends_on:
@@ -41,6 +42,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mcp-server:
+        condition: service_started
 
   worker:
     build:
@@ -52,11 +55,14 @@ services:
     environment:
       POSTGRES_DSN: postgresql://deepequity:deepequity@postgres:5432/deepequity
       REDIS_URL: redis://redis:6379/0
+      MCP_SERVER_URL: http://mcp-server:8000/mcp
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mcp-server:
+        condition: service_started
 
   mcp-server:
     build:
