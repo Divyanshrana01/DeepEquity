@@ -24,8 +24,11 @@ RUN uv sync --frozen --no-install-project --no-dev
 # worker would stall for however long a 130MB download takes the first time it processes
 # a document, and a container with no internet access would never work at all.
 ENV FASTEMBED_CACHE_PATH=/app/.model_cache
-RUN python -c \
-    "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
+RUN python -c "\
+from fastembed import TextEmbedding; \
+from fastembed.rerank.cross_encoder import TextCrossEncoder; \
+TextEmbedding(model_name='BAAI/bge-small-en-v1.5'); \
+TextCrossEncoder(model_name='Xenova/ms-marco-MiniLM-L-6-v2')"
 
 COPY README.md ./
 COPY src ./src

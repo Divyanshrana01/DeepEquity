@@ -7,6 +7,7 @@ from deepequity.api.logging_middleware import RequestLoggingMiddleware
 from deepequity.api.rate_limit import RateLimitMiddleware
 from deepequity.api.routes.health import router as health_router
 from deepequity.api.routes.ingest import router as ingest_router
+from deepequity.api.routes.search import router as search_router
 from deepequity.core.config import get_settings
 from deepequity.core.db import close_pool, run_migrations
 from deepequity.core.logging import configure_logging
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(ingest_router)
+    app.include_router(search_router)
 
     return app
 

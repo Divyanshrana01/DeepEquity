@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     child_chunk_overlap_chars: int = 80
     parent_chunk_chars: int = 2000
 
+    # Retrieval. We pull a wide net of candidates from each search method, fuse them,
+    # then let the reranker pick the final few. Candidates need to be comfortably bigger
+    # than the final count or the reranker has nothing to improve on.
+    retrieval_candidates_per_method: int = 30
+    retrieval_final_top_k: int = 5
+    # Reciprocal Rank Fusion constant. 60 is the value from the original paper, it
+    # softens the gap between rank 1 and rank 2 so a single method can't dominate purely
+    # by being confident.
+    rrf_k: int = 60
+    # Cross-encoder that rescores the fused candidates. Slower than the embedding model
+    # because it reads the query and passage together, which is exactly why it's more
+    # accurate and why we only run it on a shortlist.
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    reranker_enabled: bool = True
+
     # Filings are megabytes of html. This is the ceiling on what the worker will pull
     # down for one document, a guard against a pathological file eating all our memory.
     max_document_bytes: int = 20_000_000
