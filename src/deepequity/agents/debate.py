@@ -4,7 +4,8 @@ import anyio
 
 from deepequity.agents.llm import complete_structured
 from deepequity.agents.retriever import format_evidence, select_for_prompt
-from deepequity.agents.schemas import Stance, Thesis
+from deepequity.agents.routing import AgentRole
+from deepequity.agents.schemas import AgentCost, Stance, Thesis
 from deepequity.core.config import get_settings
 from deepequity.core.logging import get_logger
 from deepequity.prompts.loader import load
@@ -60,9 +61,9 @@ async def build_thesis(
     evidence: list[RetrievedChunk],
     focus: str,
     previous: Thesis | None = None,
-) -> tuple[Thesis, int]:
-    settings = get_settings()
+) -> tuple[Thesis, AgentCost]:
     prompt = load("bull" if stance is Stance.BULL else "bear")
+    role = AgentRole.BULL if stance is Stance.BULL else AgentRole.BEAR
 
     #only the strongest few passages are sent, so work out which ones those are here and
     #validate citations against exactly that set. checking against the whole retrieved
@@ -95,7 +96,11 @@ async def build_thesis(
         system_prompt=prompt.text,
         user_prompt="\n".join(user_parts),
         schema=Thesis,
-        model=settings.llm_fast_model,
+        role=role,
+        #an opening thesis and a revision of one are near identical as text and completely
+        #different as jobs, so they get separate cache namespaces rather than being left
+        #to a similarity score that cannot tell them apart
+        cache_variant=":revision" if previous is not None else ":opening",
     )
 
     thesis = response.parsed
@@ -119,8 +124,10 @@ async def build_thesis(
         invented_citations_dropped=dropped,
         gaps=len(thesis.evidence_gaps),
         tokens=response.usage.total,
+        cost_usd=response.cost_usd,
+        cached=response.cached,
     )
-    return thesis, response.usage.total
+    return thesis, response.cost_record()
 
 
 #runs both sides at once. they don't read each other's output within a round, which is
@@ -131,9 +138,9 @@ async def run_debate_round(
     evidence: list[RetrievedChunk],
     focus: str,
     previous: list[Thesis] | None = None,
-) -> tuple[list[Thesis], int]:
+) -> tuple[list[Thesis], list[AgentCost]]:
     prior = {thesis.stance: thesis for thesis in (previous or [])}
-    results: dict[Stance, tuple[Thesis, int]] = {}
+    results: dict[Stance, tuple[Thesis, AgentCost]] = {}
 
     async def run_side(stance: Stance) -> None:
         results[stance] = await build_thesis(
@@ -153,5 +160,5 @@ async def run_debate_round(
     #stable order, bull then bear, so downstream code and the trace don't depend on which
     #request happened to finish first
     theses = [results[Stance.BULL][0], results[Stance.BEAR][0]]
-    tokens = results[Stance.BULL][1] + results[Stance.BEAR][1]
-    return theses, tokens
+    costs = [results[Stance.BULL][1], results[Stance.BEAR][1]]
+    return theses, costs

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Annotated, TypedDict
 
-from deepequity.agents.schemas import ResearchNote, ResearchScope, Thesis
+from deepequity.agents.memory import MemoryEntry
+from deepequity.agents.schemas import AgentCost, ResearchNote, ResearchScope, Thesis
 from deepequity.retrieval.models import RetrievedChunk
 
 
@@ -24,12 +25,25 @@ def add_ints(current: int, incoming: int) -> int:
     return current + incoming
 
 
+def append_costs(current: list[AgentCost], incoming: list[AgentCost]) -> list[AgentCost]:
+    return current + incoming
+
+
 #Everything flowing through the graph. One typed object rather than agents passing
 #arguments around, which means any node can see the whole picture and the entire run can
 #be checkpointed and resumed by saving one thing.
 class ResearchState(TypedDict, total=False):
     #what was asked
     ticker: str
+
+    #the id this run is checkpointed under. carried in the state rather than only in the
+    #graph config because the synthesis step writes the finished note into long-term
+    #memory keyed by it, and a node can only see the state.
+    run_id: str
+
+    #what we concluded about this company on earlier runs. recalled once, before planning,
+    #and kept in the state so the trace shows what the planner was actually working from.
+    memories: list[MemoryEntry]
 
     #what the planner decided before any evidence was gathered
     scope: ResearchScope | None
@@ -58,6 +72,11 @@ class ResearchState(TypedDict, total=False):
     #running total, so the token budget can be enforced mid-run rather than discovered
     #afterwards
     tokens_used: Annotated[int, add_ints]
+
+    #one entry per model call, with the model, the tokens and the money. the running total
+    #above answers "are we near the ceiling", this answers "where did it all go", and the
+    #second question is the one you need when a run costs more than you expected.
+    costs: Annotated[list[AgentCost], append_costs]
 
     #why the run finished: completed, or which limit stopped it. worth recording, a note
     #produced after hitting the budget deserves to be read differently from one that

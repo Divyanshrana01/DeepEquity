@@ -15,6 +15,27 @@ class Stance(StrEnum):
     BEAR = "bear"
 
 
+#What one agent's call cost. Kept per call rather than as a single total for the run,
+#because "the run used 40k tokens" doesn't tell you where to look and "synthesis was 60%
+#of the bill" does. It's also how the model routing gets checked: if the planner shows up
+#on the expensive model, the routing is wrong and this is where it shows.
+class AgentCost(BaseModel):
+    agent: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+    #served from the semantic cache. the tokens are still recorded so the saving can be
+    #measured, but nothing was actually spent.
+    cached: bool = False
+    #what this call would have cost had the cache missed. zero on a real call.
+    saved_usd: float = 0.0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
 #Points at the exact passage a claim rests on. This is what makes a note checkable: a
 #reader can follow any sentence back to the text it came from, and we can verify after
 #the fact that the passage really says what the agent said it does.

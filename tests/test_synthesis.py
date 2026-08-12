@@ -6,6 +6,7 @@ import pytest
 
 import deepequity.agents.synthesis as synthesis
 from deepequity.agents.llm import LLMResponse, Usage
+from deepequity.agents.routing import AgentRole, model_for
 from deepequity.agents.schemas import (
     Citation,
     Claim,
@@ -80,7 +81,13 @@ def _fake_llm(monkeypatch: pytest.MonkeyPatch, note: ResearchNote) -> dict[str, 
         captured["system"] = system_prompt
         captured["user"] = user_prompt
         captured["model"] = kwargs.get("model")
-        return LLMResponse(parsed=note, usage=Usage(50, 100), model="fake")
+        captured["role"] = kwargs.get("role")
+        return LLMResponse(
+            parsed=note,
+            usage=Usage(50, 100),
+            model="fake",
+            role=kwargs.get("role", AgentRole.SYNTHESIS),
+        )
 
     monkeypatch.setattr(synthesis, "complete_structured", fake_complete)
     return captured
@@ -180,12 +187,15 @@ async def test_citations_that_were_argued_survive(monkeypatch: pytest.MonkeyPatc
 
 async def test_synthesis_uses_the_strong_model(monkeypatch: pytest.MonkeyPatch) -> None:
     # This is the reasoning-heavy step and the one anyone actually reads, so it's where
-    # the expensive model is worth spending on.
+    # the expensive model is worth spending on. The agent asks for a role now rather than
+    # naming a model, so the check goes through the routing table, which is the thing that
+    # would actually be wrong if this broke.
     captured = _fake_llm(monkeypatch, _note([]))
 
     await synthesis.synthesise("AAPL", _theses([101]), [_chunk(101)])
 
-    assert captured["model"] == get_settings().llm_strong_model
+    assert captured["role"] is AgentRole.SYNTHESIS
+    assert model_for(captured["role"]) == get_settings().llm_strong_model
 
 
 async def test_both_theses_reach_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:

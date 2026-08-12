@@ -5,7 +5,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
+import deepequity.agents.cache as cache
 import deepequity.agents.llm as llm
+from deepequity.agents.routing import AgentRole
 from deepequity.agents.schemas import Thesis
 from deepequity.core.config import get_settings
 
@@ -228,3 +230,105 @@ async def test_missing_api_key_says_what_to_do(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(RuntimeError, match="console.groq.com"):
         llm.get_client()
+
+
+# --- cost and cache --------------------------------------------------------------------
+
+
+async def test_a_real_call_is_priced_and_labelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeClient(['{"value": "x"}'])
+    monkeypatch.setattr(llm, "get_client", lambda: client)
+
+    response = await llm.complete_structured(
+        "sys", "user", Inner, role=AgentRole.SYNTHESIS
+    )
+    record = response.cost_record()
+
+    assert response.cached is False
+    assert record.agent == "synthesis"
+    assert record.cost_usd > 0
+    assert record.saved_usd == 0.0
+    # the role picks the model, no caller names one
+    assert response.model == get_settings().llm_strong_model
+
+
+async def test_a_cache_hit_costs_nothing_and_skips_the_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This is the whole point of the cache and the only thing worth asserting about it
+    # here: the api is not called, and the run is not charged, while the tokens the
+    # original answer used are still reported so the saving can be measured.
+    client = FakeClient(['{"value": "x"}'])
+    monkeypatch.setattr(llm, "get_client", lambda: client)
+    monkeypatch.setattr(llm, "is_cacheable", lambda role: True)
+
+    async def fake_lookup(*_args: Any, **_kwargs: Any) -> cache.CacheHit:
+        return cache.CacheHit(
+            raw='{"value": "from cache"}',
+            model="openai/gpt-oss-20b",
+            prompt_tokens=5000,
+            completion_tokens=800,
+            similarity=0.99,
+        )
+
+    async def unreached_store(**_kwargs: Any) -> None:
+        raise AssertionError("a cache hit must not write the entry back")
+
+    monkeypatch.setattr(cache, "lookup", fake_lookup)
+    monkeypatch.setattr(cache, "store", unreached_store)
+
+    response = await llm.complete_structured("sys", "user", Inner, role=AgentRole.BULL)
+    record = response.cost_record()
+
+    assert response.parsed.value == "from cache"
+    assert client.completions.calls == []
+    assert record.cost_usd == 0.0
+    assert record.saved_usd > 0
+    assert record.total_tokens == 5800
+
+
+async def test_a_stale_cache_entry_becomes_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A cached blob outlives the schema that produced it. It should quietly fall through
+    # to a real call rather than throwing at an agent that has no idea a cache exists.
+    client = FakeClient(['{"value": "fresh"}'])
+    monkeypatch.setattr(llm, "get_client", lambda: client)
+    monkeypatch.setattr(llm, "is_cacheable", lambda role: True)
+
+    async def stale_lookup(*_args: Any, **_kwargs: Any) -> cache.CacheHit:
+        return cache.CacheHit(
+            raw='{"wrong_field": 1}',
+            model="openai/gpt-oss-20b",
+            prompt_tokens=10,
+            completion_tokens=10,
+            similarity=1.0,
+        )
+
+    async def noop_store(**_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(cache, "lookup", stale_lookup)
+    monkeypatch.setattr(cache, "store", noop_store)
+
+    response = await llm.complete_structured("sys", "user", Inner, role=AgentRole.BULL)
+
+    assert response.parsed.value == "fresh"
+    assert response.cached is False
+
+
+async def test_a_broken_cache_does_not_break_the_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Redis being down should cost us the saving, not the research.
+    client = FakeClient(['{"value": "fresh"}'])
+    monkeypatch.setattr(llm, "get_client", lambda: client)
+    monkeypatch.setattr(llm, "is_cacheable", lambda role: True)
+
+    async def broken(*_args: Any, **_kwargs: Any):
+        raise RuntimeError("redis is down")
+
+    monkeypatch.setattr(cache, "lookup", broken)
+    monkeypatch.setattr(cache, "store", broken)
+
+    response = await llm.complete_structured("sys", "user", Inner, role=AgentRole.BULL)
+
+    assert response.parsed.value == "fresh"

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from deepequity.agents import run_store
 from deepequity.agents.graph import run_research
 from deepequity.agents.run_store import ResearchRun, RunStatus
+from deepequity.agents.schemas import AgentCost
 from deepequity.agents.state import ResearchState
 from deepequity.api.auth import require_auth
 from deepequity.core.logging import get_logger
@@ -33,6 +34,19 @@ class ResearchAccepted(BaseModel):
     estimated_seconds: int
 
 
+#rolls the per-call cost records up into the totals the run reports.
+#
+#the breakdown is kept as well as the total. a single number tells you a run was expensive
+#and nothing about why, and the first thing anyone wants next is which agent spent it.
+def _cost_fields(costs: list[AgentCost]) -> dict[str, Any]:
+    return {
+        "cost_usd": round(sum(cost.cost_usd for cost in costs), 6),
+        "saved_usd": round(sum(cost.saved_usd for cost in costs), 6),
+        "cached_calls": sum(1 for cost in costs if cost.cached),
+        "costs": costs,
+    }
+
+
 #does the actual work, outside the request. a run takes minutes, so it cannot happen while
 #a client holds a connection open, most proxies give up somewhere around thirty seconds.
 async def _execute(run_id: str, ticker: str) -> None:
@@ -43,6 +57,7 @@ async def _execute(run_id: str, ticker: str) -> None:
             stage=stage,
             rounds=state.get("round_count", 0),
             tokens_used=state.get("tokens_used", 0),
+            **_cost_fields(state.get("costs", [])),
         )
 
     try:
@@ -64,6 +79,7 @@ async def _execute(run_id: str, ticker: str) -> None:
         stage="complete" if note else "failed",
         rounds=final.get("round_count", 0),
         tokens_used=final.get("tokens_used", 0),
+        **_cost_fields(final.get("costs", [])),
         stop_reason=final.get("stop_reason"),
         note=note,
         error=None if note else "the run finished without producing a note",

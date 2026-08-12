@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from deepequity.agents.schemas import ResearchNote
+from deepequity.agents.schemas import AgentCost, ResearchNote
 from deepequity.core.logging import get_logger
 from deepequity.core.redis_client import aw, get_redis
 
@@ -39,29 +39,49 @@ class ResearchRun(BaseModel):
     stage: str = "queued"
     rounds: int = 0
     tokens_used: int = 0
+    #what the run cost, in dollars, and what the semantic cache saved it. exposed on the
+    #run rather than buried in logs because "how much does one of these cost" is a
+    #question anyone looking at this will ask within about a minute.
+    cost_usd: float = 0.0
+    saved_usd: float = 0.0
+    cached_calls: int = 0
+    #the same money broken down by agent, so the total is checkable rather than asserted
+    costs: list[AgentCost] = []
     stop_reason: str | None = None
     note: ResearchNote | None = None
     error: str | None = None
 
 
-#redis hashes hold flat strings, so the note goes in as json and comes back out again
+#redis hashes hold flat strings, so anything nested goes in as json and comes back out
+#again. the note and the per-agent cost breakdown are both nested, everything else is a
+#scalar that str() handles fine.
+_NESTED = ("note", "costs")
+
+
 def _dump(run: ResearchRun) -> dict[str, str]:
     payload = run.model_dump(mode="json")
-    note = payload.pop("note")
+    nested = {field: payload.pop(field) for field in _NESTED}
     flat = {key: "" if value is None else str(value) for key, value in payload.items()}
-    flat["note"] = json.dumps(note) if note else ""
+    for field, value in nested.items():
+        flat[field] = json.dumps(value) if value else ""
     return flat
 
 
 def _load(raw: dict[str, Any]) -> ResearchRun:
     data: dict[str, Any] = dict(raw)
     note_json = data.pop("note", "") or ""
+    costs_json = data.pop("costs", "") or ""
     #empty strings came from None on the way in, put them back rather than letting
     #"stop_reason: ''" reach the caller
     for nullable in ("stop_reason", "error"):
         if not data.get(nullable):
             data[nullable] = None
     data["note"] = ResearchNote.model_validate_json(note_json) if note_json else None
+    data["costs"] = (
+        [AgentCost.model_validate(item) for item in json.loads(costs_json)]
+        if costs_json
+        else []
+    )
     return ResearchRun.model_validate(data)
 
 

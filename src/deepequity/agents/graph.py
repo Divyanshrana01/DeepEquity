@@ -8,8 +8,10 @@ from langgraph.graph import END, StateGraph
 
 from deepequity.agents.checkpoint import get_checkpointer
 from deepequity.agents.debate import run_debate_round
+from deepequity.agents.memory import recall, remember
 from deepequity.agents.planner import plan_research
 from deepequity.agents.retriever import gather_evidence
+from deepequity.agents.run_context import set_current_run
 from deepequity.agents.state import ResearchState
 from deepequity.agents.supervisor import Route, decide_next, stop_reason_for
 from deepequity.agents.synthesis import synthesise
@@ -24,8 +26,20 @@ logger = get_logger("deepequity.agents.graph")
 
 
 async def plan_node(state: ResearchState) -> dict:
-    scope, tokens = await plan_research(state["ticker"])
-    return {"scope": scope, "tokens_used": tokens}
+    ticker = state["ticker"]
+
+    #memory is looked up here rather than in the planner itself so the recalled notes land
+    #in the state. that keeps them in the checkpoint and in the trace, which matters:
+    #if a plan looks odd, the first question is what it was told about previous runs.
+    memories = await recall(ticker, query=f"{ticker} equity research thesis and risks")
+
+    scope, cost = await plan_research(ticker, memories=memories)
+    return {
+        "scope": scope,
+        "memories": memories,
+        "tokens_used": cost.total_tokens,
+        "costs": [cost],
+    }
 
 
 async def retrieve_node(state: ResearchState) -> dict:
@@ -42,7 +56,7 @@ async def debate_node(state: ResearchState) -> dict:
     scope = state["scope"]
     focus = scope.focus if scope else state["ticker"]
 
-    theses, tokens = await run_debate_round(
+    theses, costs = await run_debate_round(
         ticker=state["ticker"],
         evidence=state.get("evidence", []),
         focus=focus,
@@ -50,16 +64,34 @@ async def debate_node(state: ResearchState) -> dict:
         #the same one again
         previous=state.get("theses", [])[-2:] or None,
     )
-    return {"theses": theses, "tokens_used": tokens, "round_count": 1}
+    return {
+        "theses": theses,
+        "tokens_used": sum(cost.total_tokens for cost in costs),
+        "costs": costs,
+        "round_count": 1,
+    }
 
 
 async def synthesise_node(state: ResearchState) -> dict:
-    note, tokens = await synthesise(
-        ticker=state["ticker"],
+    ticker = state["ticker"]
+    note, cost = await synthesise(
+        ticker=ticker,
         theses=state.get("theses", []),
         evidence=state.get("evidence", []),
     )
-    return {"note": note, "tokens_used": tokens}
+
+    #the note goes into long-term memory as the last thing that happens, after it exists
+    #and is about to be returned. remember() swallows its own failures, so a database
+    #problem here loses us the memory and not the research.
+    scope = state.get("scope")
+    await remember(
+        ticker=ticker,
+        run_id=state.get("run_id", ""),
+        focus=scope.focus if scope else ticker,
+        note=note,
+    )
+
+    return {"note": note, "tokens_used": cost.total_tokens, "costs": [cost]}
 
 
 #works out what a run is currently doing, from what's in the state. used for progress
@@ -163,14 +195,22 @@ async def run_research(
 ) -> ResearchState:
     graph = await get_compiled_graph()
 
+    thread_id = run_id or str(uuid.uuid4())
+    #everything below this point runs inside the run's context, which is how the semantic
+    #cache knows not to serve a run its own earlier answers
+    set_current_run(thread_id)
+
     initial: ResearchState = {
         "ticker": ticker.strip().upper(),
+        "run_id": thread_id,
         "scope": None,
+        "memories": [],
         "evidence": [],
         "theses": [],
         "note": None,
         "round_count": 0,
         "tokens_used": 0,
+        "costs": [],
         "errors": [],
     }
 
@@ -183,7 +223,7 @@ async def run_research(
     #synthesis instead of doing new research.
     config: dict[str, Any] = {
         "recursion_limit": 25,
-        "configurable": {"thread_id": run_id or str(uuid.uuid4())},
+        "configurable": {"thread_id": thread_id},
     }
 
     logger.info("research_started", ticker=initial["ticker"], run_id=run_id)
@@ -204,11 +244,16 @@ async def run_research(
     #those are exactly the runs that would finish with no explanation of why they stopped.
     final["stop_reason"] = stop_reason_for(final)
 
+    costs = final.get("costs", [])
     logger.info(
         "research_finished",
         ticker=initial["ticker"],
         rounds=final.get("round_count", 0),
         tokens=final.get("tokens_used", 0),
+        cost_usd=round(sum(cost.cost_usd for cost in costs), 6),
+        saved_usd=round(sum(cost.saved_usd for cost in costs), 6),
+        cached_calls=sum(1 for cost in costs if cost.cached),
+        llm_calls=len(costs),
         stop_reason=final.get("stop_reason"),
         has_note=final.get("note") is not None,
     )

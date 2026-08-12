@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # Both of these support strict json schema output, which the agents rely on.
     llm_fast_model: str = "openai/gpt-oss-20b"
     llm_strong_model: str = "openai/gpt-oss-120b"
+    # Which agent roles get the strong model. A setting rather than a hardcoded list
+    # because "does the cheap model hold up on this job" is a measurable experiment, and
+    # it should be a config change plus an eval rerun, not a code edit.
+    llm_strong_roles: str = "synthesis"
     # Low but not zero. Zero makes the debate agents repetitive, high makes them invent.
     llm_temperature: float = 0.3
     llm_max_output_tokens: int = 4096
@@ -134,6 +138,32 @@ class Settings(BaseSettings):
     # Hard ceiling per research run. When it's hit the graph stops and returns what it
     # has rather than continuing to spend.
     max_tokens_per_run: int = 120_000
+
+    # Semantic cache. Answers are keyed by the meaning of the prompt rather than its exact
+    # text, so a repeat run on the same ticker reuses work instead of paying for it again.
+    semantic_cache_enabled: bool = True
+    # How alike two prompts must be to count as the same question. Set high on purpose:
+    # the bull and bear prompts for one company are built from identical evidence and sit
+    # around 0.95 similar, so anything looser would serve one agent the other's answer.
+    # Missing a real hit costs a few cents, returning the wrong note costs trust.
+    semantic_cache_threshold: float = 0.97
+    semantic_cache_ttl_seconds: int = 7 * 24 * 60 * 60
+    # Cap on entries kept per namespace, and on how many we compare against per lookup.
+    # Comparing 384-dim vectors is about a millisecond for a few hundred, which is free
+    # next to an LLM call, but it should still not grow without limit.
+    semantic_cache_max_entries: int = 200
+    semantic_cache_scan_limit: int = 200
+    # Which roles may be served from cache. Everything, by default. Worth narrowing if a
+    # role ever needs to be genuinely fresh every time.
+    semantic_cache_roles: str = "planner,bull,bear,synthesis"
+
+    # Long-term memory. Finished notes are embedded into pgvector and recalled when the
+    # same ticker comes round again, so a later run starts from what we already concluded
+    # instead of from nothing.
+    memory_enabled: bool = True
+    # How many past notes to put in front of the planner. Three is enough to show a trend
+    # without the prompt turning into a history lesson.
+    memory_recall_limit: int = 3
 
     # Filings are megabytes of html. This is the ceiling on what the worker will pull
     # down for one document, a guard against a pathological file eating all our memory.

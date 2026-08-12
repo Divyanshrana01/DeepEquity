@@ -9,7 +9,12 @@ from typing import Any, TypeVar, cast
 from groq import APIConnectionError, APIStatusError, AsyncGroq, RateLimitError
 from pydantic import BaseModel, ValidationError
 
+from deepequity.agents import cache
+from deepequity.agents.routing import AgentRole, is_cacheable, model_for
+from deepequity.agents.run_context import current_run_id
+from deepequity.agents.schemas import AgentCost
 from deepequity.core.config import get_settings
+from deepequity.core.costs import cost_usd
 from deepequity.core.logging import get_logger
 
 logger = get_logger("deepequity.agents.llm")
@@ -49,6 +54,42 @@ class LLMResponse[TModel: BaseModel]:
     parsed: TModel
     usage: Usage
     model: str
+    #no default on purpose. a cost record labelled with the wrong agent is worse than no
+    #breakdown at all, because it quietly points the blame for a big bill at the wrong
+    #part of the graph. making it required means it can't be forgotten.
+    role: AgentRole
+    #served from the semantic cache rather than the api. the tokens are still reported,
+    #because what the call would have cost is exactly the interesting number, but the
+    #money is zero and the two have to be told apart or the saving becomes invisible.
+    cached: bool = False
+    similarity: float | None = None
+
+    #what this call actually cost. a cache hit is free, so it prices at zero regardless of
+    #how many tokens the original answer took.
+    @property
+    def cost_usd(self) -> float:
+        if self.cached:
+            return 0.0
+        return cost_usd(self.model, self.usage.prompt_tokens, self.usage.completion_tokens)
+
+    #one line for the run's cost breakdown, so a caller can see which agent spent what
+    #without adding up log lines by hand
+    def cost_record(self) -> AgentCost:
+        return AgentCost(
+            agent=self.role.value,
+            model=self.model,
+            prompt_tokens=self.usage.prompt_tokens,
+            completion_tokens=self.usage.completion_tokens,
+            cost_usd=self.cost_usd,
+            cached=self.cached,
+            #what we would have paid without the cache. only meaningful on a hit, and it
+            #is the number that answers "did the cache actually save anything".
+            saved_usd=(
+                cost_usd(self.model, self.usage.prompt_tokens, self.usage.completion_tokens)
+                if self.cached
+                else 0.0
+            ),
+        )
 
 
 def get_client() -> AsyncGroq:
@@ -125,22 +166,93 @@ def _to_strict_schema(model: type[BaseModel]) -> dict[str, Any]:
     return dict(inline(schema))
 
 
+#checks the semantic cache and turns a hit back into a parsed response.
+#
+#a cached answer is still validated against the schema rather than trusted. it was valid
+#when it went in, but the schema can change underneath it, and a stale blob that no longer
+#parses should quietly become a cache miss instead of an exception thrown at an agent that
+#has no idea a cache exists. cache trouble of any kind degrades to "just call the api".
+async def _try_cache[TModel: BaseModel](
+    namespace: str,
+    user_prompt: str,
+    schema: type[TModel],
+    model: str,
+    role: AgentRole,
+) -> LLMResponse[TModel] | None:
+    try:
+        hit = await cache.lookup(
+            namespace, user_prompt, exclude_origin=current_run_id()
+        )
+    except Exception as exc:  # noqa: BLE001 - a broken cache must never stop a run
+        logger.warning("semantic_cache_lookup_failed", role=role.value, error=str(exc))
+        return None
+
+    if hit is None:
+        return None
+
+    try:
+        parsed = schema.model_validate_json(hit.raw)
+    except (ValidationError, json.JSONDecodeError):
+        logger.warning("semantic_cache_entry_stale", namespace=namespace, schema=schema.__name__)
+        return None
+
+    logger.info(
+        "llm_call_served_from_cache",
+        role=role.value,
+        model=hit.model,
+        schema=schema.__name__,
+        similarity=hit.similarity,
+        tokens_saved=hit.prompt_tokens + hit.completion_tokens,
+    )
+    return LLMResponse(
+        parsed=parsed,
+        usage=Usage(
+            prompt_tokens=hit.prompt_tokens, completion_tokens=hit.completion_tokens
+        ),
+        model=hit.model,
+        role=role,
+        cached=True,
+        similarity=hit.similarity,
+    )
+
+
 #asks the model a question and insists on getting back something matching the schema.
 #
 #retries cover two different failures. a rate limit or a dropped connection is worth
 #simply trying again. output that doesn't fit the schema is worth trying again too, but
 #differently: we hand the model its own broken output and the error, because telling it
 #what went wrong works far better than asking the same question again and hoping.
+#
+#before any of that it checks the semantic cache. a repeat run on the same ticker asks the
+#planner a word for word identical question and the debate agents very nearly identical
+#ones, so this is where a second run stops costing money.
 async def complete_structured[TModel: BaseModel](
     system_prompt: str,
     user_prompt: str,
     schema: type[TModel],
+    role: AgentRole = AgentRole.PLANNER,
     model: str | None = None,
     temperature: float | None = None,
+    cache_variant: str = "",
 ) -> LLMResponse[TModel]:
     settings = get_settings()
-    model = model or settings.llm_fast_model
+    #the model comes from the routing table unless a caller names one, which is really
+    #only tests and one-off experiments
+    model = model or model_for(role)
     temperature = settings.llm_temperature if temperature is None else temperature
+
+    #cache_variant lets a caller say "this call is a different kind of question" when the
+    #wording alone doesn't make that obvious. the debate uses it to keep an opening thesis
+    #apart from a revision, which read almost identically to a similarity score and are
+    #not remotely the same job.
+    namespace = cache.namespace_for(
+        f"{role.value}{cache_variant}", model, schema.__name__, system_prompt
+    )
+    if is_cacheable(role):
+        hit = await _try_cache(namespace, user_prompt, schema, model, role)
+        if hit is not None:
+            return hit
+
     client = get_client()
 
     messages: list[dict[str, str]] = [
@@ -254,15 +366,35 @@ async def complete_structured[TModel: BaseModel](
             )
             continue
 
+        #only cached once it has parsed. storing the raw text before validating would let
+        #a broken generation be served back to every future run that asks a similar
+        #question, which turns one bad answer into a permanent one.
+        if is_cacheable(role):
+            try:
+                await cache.store(
+                    namespace=namespace,
+                    prompt=user_prompt,
+                    raw=raw,
+                    model=model,
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    origin=current_run_id(),
+                )
+            except Exception as exc:  # noqa: BLE001 - failing to cache is not failing
+                logger.warning("semantic_cache_store_failed", role=role.value, error=str(exc))
+
+        spent = cost_usd(model, usage.prompt_tokens, usage.completion_tokens)
         logger.info(
             "llm_call_complete",
+            role=role.value,
             model=model,
             schema=schema.__name__,
             attempt=attempt,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
+            cost_usd=spent,
         )
-        return LLMResponse(parsed=parsed, usage=usage, model=model)
+        return LLMResponse(parsed=parsed, usage=usage, model=model, role=role)
 
     raise StructuredOutputError(
         f"{model} could not produce valid {schema.__name__} after "

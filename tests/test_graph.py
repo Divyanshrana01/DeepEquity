@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 import deepequity.agents.graph as graph_module
+from deepequity.agents.memory import MemoryEntry
 from deepequity.agents.schemas import (
+    AgentCost,
     ConfidenceBreakdown,
     ResearchNote,
     ResearchScope,
@@ -28,6 +31,18 @@ def _chunk(chunk_id: int) -> RetrievedChunk:
     )
 
 
+#a stand-in for what one agent's call cost. the token split is arbitrary, what matters is
+#that the totals the graph reports are built from these and not made up somewhere else.
+def _cost(agent: str, tokens: int) -> AgentCost:
+    return AgentCost(
+        agent=agent,
+        model="fake-model",
+        prompt_tokens=tokens,
+        completion_tokens=0,
+        cost_usd=tokens / 1000,
+    )
+
+
 def _note() -> ResearchNote:
     return ResearchNote(
         ticker="AAPL",
@@ -47,13 +62,21 @@ def _note() -> ResearchNote:
 # limits hold. Whether the agents write good arguments is a separate question.
 @pytest.fixture
 def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    calls: dict[str, Any] = {"order": [], "debate_rounds": 0, "gaps": []}
+    calls: dict[str, Any] = {
+        "order": [],
+        "debate_rounds": 0,
+        "gaps": [],
+        "memories": [],
+    }
 
-    async def fake_plan(ticker: str) -> tuple[ResearchScope, int]:
+    async def fake_plan(
+        ticker: str, memories: Any = None
+    ) -> tuple[ResearchScope, AgentCost]:
         calls["order"].append("plan")
+        calls["memories_seen"] = memories or []
         return ResearchScope(
             focus="a focus", search_queries=["q1"], reasoning="because"
-        ), 100
+        ), _cost("planner", 100)
 
     async def fake_gather(scope: Any, ticker: str, already: Any = None) -> list[RetrievedChunk]:
         calls["order"].append("retrieve")
@@ -61,7 +84,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     async def fake_debate(
         ticker: str, evidence: Any, focus: str, previous: Any = None
-    ) -> tuple[list[Thesis], int]:
+    ) -> tuple[list[Thesis], list[AgentCost]]:
         calls["order"].append("debate")
         calls["debate_rounds"] += 1
         calls["saw_previous"] = previous is not None
@@ -69,14 +92,29 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return [
             Thesis(stance=Stance.BULL, summary="bull", claims=[], evidence_gaps=gaps),
             Thesis(stance=Stance.BEAR, summary="bear", claims=[], evidence_gaps=gaps),
-        ], 200
+        ], [_cost("bull", 120), _cost("bear", 80)]
 
     async def fake_synthesise(
         ticker: str, theses: Any, evidence: Any
-    ) -> tuple[ResearchNote, int]:
+    ) -> tuple[ResearchNote, AgentCost]:
         calls["order"].append("synthesise")
         calls["theses_seen"] = len(theses)
-        return _note(), 300
+        return _note(), _cost("synthesis", 300)
+
+    #long-term memory talks to postgres, which isn't running in ci. the graph tests are
+    #about wiring, so both sides are stubbed and what got passed around is recorded.
+    async def fake_recall(ticker: str, query: str, limit: Any = None) -> list[MemoryEntry]:
+        calls["recalled_for"] = ticker
+        return calls["memories"]
+
+    async def fake_remember(
+        ticker: str, run_id: str, focus: str, note: ResearchNote
+    ) -> bool:
+        calls["remembered"] = {"ticker": ticker, "run_id": run_id, "focus": focus}
+        return True
+
+    monkeypatch.setattr(graph_module, "recall", fake_recall)
+    monkeypatch.setattr(graph_module, "remember", fake_remember)
 
     monkeypatch.setattr(graph_module, "plan_research", fake_plan)
     monkeypatch.setattr(graph_module, "gather_evidence", fake_gather)
@@ -190,3 +228,64 @@ async def test_all_theses_from_every_round_reach_synthesis(
     await graph_module.run_research("AAPL")
 
     assert wired["theses_seen"] == 4
+
+
+# --- cost tracking and long-term memory ------------------------------------------------
+
+
+async def test_every_call_shows_up_in_the_cost_breakdown(wired: dict[str, Any]) -> None:
+    # One total tells you a run was expensive. The breakdown tells you which agent did it,
+    # which is the question you actually have next.
+    final = await graph_module.run_research("AAPL")
+
+    assert [cost.agent for cost in final["costs"]] == [
+        "planner",
+        "bull",
+        "bear",
+        "synthesis",
+    ]
+    assert sum(cost.total_tokens for cost in final["costs"]) == final["tokens_used"]
+
+
+async def test_the_cost_breakdown_grows_with_extra_rounds(wired: dict[str, Any]) -> None:
+    # A second debate round is real money, so it has to appear in the breakdown rather
+    # than being folded into whatever the first round reported.
+    wired["gaps"] = ["more please"]
+
+    final = await graph_module.run_research("AAPL")
+
+    assert [cost.agent for cost in final["costs"]].count("bull") == 2
+    assert [cost.agent for cost in final["costs"]].count("bear") == 2
+
+
+async def test_past_notes_are_recalled_before_planning(wired: dict[str, Any]) -> None:
+    # The point of long-term memory is that the planner sees it. Recalling notes and then
+    # not passing them anywhere would look identical in the logs and do nothing at all.
+    wired["memories"] = [
+        MemoryEntry(
+            run_id="older-run",
+            ticker="AAPL",
+            focus="services margin",
+            summary="margin gains were slowing",
+            created_at=datetime.now(UTC) - timedelta(days=30),
+        )
+    ]
+
+    final = await graph_module.run_research("AAPL")
+
+    assert wired["recalled_for"] == "AAPL"
+    assert len(wired["memories_seen"]) == 1
+    # and it stays in the state, so the trace shows what the plan was working from
+    assert len(final["memories"]) == 1
+
+
+async def test_the_finished_note_is_written_back_to_memory(wired: dict[str, Any]) -> None:
+    # Without this the second run on a ticker has nothing to recall and the whole feature
+    # is inert.
+    await graph_module.run_research("AAPL", run_id="run-42")
+
+    assert wired["remembered"] == {
+        "ticker": "AAPL",
+        "run_id": "run-42",
+        "focus": "a focus",
+    }

@@ -116,8 +116,20 @@ def _fake_llm(monkeypatch: pytest.MonkeyPatch, thesis: Thesis) -> dict[str, Any]
     async def fake_complete(
         system_prompt: str, user_prompt: str, schema: Any, **kwargs: Any
     ) -> LLMResponse[Any]:
-        captured["calls"].append({"system": system_prompt, "user": user_prompt})
-        return LLMResponse(parsed=thesis, usage=Usage(10, 20), model="fake")
+        captured["calls"].append(
+            {
+                "system": system_prompt,
+                "user": user_prompt,
+                "role": kwargs.get("role"),
+                "cache_variant": kwargs.get("cache_variant"),
+            }
+        )
+        return LLMResponse(
+            parsed=thesis,
+            usage=Usage(10, 20),
+            model="fake",
+            role=kwargs["role"],
+        )
 
     monkeypatch.setattr(debate, "complete_structured", fake_complete)
     return captured
@@ -199,13 +211,16 @@ async def test_a_second_round_shows_the_agent_its_previous_case(
     assert "do not simply repeat" in user_prompt
 
 
-async def test_tokens_from_both_sides_are_summed(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The budget can only be enforced if every call's cost actually reaches the total.
+async def test_both_sides_report_their_own_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The budget can only be enforced if every call's cost actually reaches the total, and
+    # the breakdown is kept per side rather than summed here so a run can say which of the
+    # two was expensive instead of only that the debate was.
     _fake_llm(monkeypatch, Thesis(stance=Stance.BULL, summary="x", claims=[]))
 
-    _theses, tokens = await debate.run_debate_round("AAPL", [_chunk(101)], "focus")
+    _theses, costs = await debate.run_debate_round("AAPL", [_chunk(101)], "focus")
 
-    assert tokens == 60  # 30 per side
+    assert [cost.agent for cost in costs] == ["bull", "bear"]
+    assert sum(cost.total_tokens for cost in costs) == 60  # 30 per side
 
 
 async def test_results_come_back_bull_then_bear(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,3 +231,26 @@ async def test_results_come_back_bull_then_bear(monkeypatch: pytest.MonkeyPatch)
     theses, _tokens = await debate.run_debate_round("AAPL", [_chunk(101)], "focus")
 
     assert [t.stance for t in theses] == [Stance.BULL, Stance.BEAR]
+
+
+async def test_an_opening_thesis_and_a_revision_are_cached_apart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The two prompts differ only by an appended block, so a similarity score cannot tell
+    # them apart. They are separated in the cache key instead. Caught live: without this
+    # the second round was served the first round's thesis and did nothing at all.
+    captured = _fake_llm(monkeypatch, Thesis(stance=Stance.BULL, summary="x", claims=[]))
+
+    await debate.build_thesis(Stance.BULL, "AAPL", [_chunk(101)], "focus")
+    await debate.build_thesis(
+        Stance.BULL,
+        "AAPL",
+        [_chunk(101)],
+        "focus",
+        previous=Thesis(stance=Stance.BULL, summary="earlier", claims=[]),
+    )
+
+    assert [call["cache_variant"] for call in captured["calls"]] == [
+        ":opening",
+        ":revision",
+    ]

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from deepequity.agents.llm import complete_structured
+from deepequity.agents.routing import AgentRole
 from deepequity.agents.schemas import (
+    AgentCost,
     Claim,
     ConfidenceBreakdown,
     ResearchNote,
     Thesis,
 )
-from deepequity.core.config import get_settings
 from deepequity.core.logging import get_logger
 from deepequity.prompts.loader import load
 from deepequity.retrieval.models import RetrievedChunk
@@ -83,8 +84,7 @@ def _measure_confidence(
 #and it's where an unforced error is most expensive because it's the part anyone reads.
 async def synthesise(
     ticker: str, theses: list[Thesis], evidence: list[RetrievedChunk]
-) -> tuple[ResearchNote, int]:
-    settings = get_settings()
+) -> tuple[ResearchNote, AgentCost]:
     prompt = load("synthesis")
 
     response = await complete_structured(
@@ -94,7 +94,7 @@ async def synthesise(
             + ["Reconcile these into one note."]
         ),
         schema=ResearchNote,
-        model=settings.llm_strong_model,
+        role=AgentRole.SYNTHESIS,
     )
 
     note = response.parsed
@@ -129,7 +129,7 @@ async def synthesise(
         "note_synthesised",
         ticker=ticker,
         prompt_id=prompt.id,
-        model=settings.llm_strong_model,
+        model=response.model,
         agreements=len(note.agreements),
         disagreements=len(note.disagreements),
         claims=len(kept_claims),
@@ -137,5 +137,7 @@ async def synthesise(
         invented_citations_dropped=dropped,
         overall_confidence=note.confidence.overall,
         tokens=response.usage.total,
+        cost_usd=response.cost_usd,
+        cached=response.cached,
     )
-    return note, response.usage.total
+    return note, response.cost_record()

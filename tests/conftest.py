@@ -5,6 +5,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+#the semantic cache is off for every test unless a test turns it on itself.
+#
+#this is not tidiness, it is a real bug that already bit. the cache lives in redis and is
+#invisible to callers by design, so with it on, one test's answer gets served to another
+#test that expected to call the model, and the assertion fails somewhere far away from the
+#cause. the same thing happens against whatever a developer's local redis happens to be
+#holding, which makes a green run mean nothing.
+#
+#tests that are actually about the cache exercise the cache module directly.
+@pytest.fixture(autouse=True)
+def semantic_cache_off(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    from deepequity.core.config import get_settings
+
+    monkeypatch.setenv("SEMANTIC_CACHE_ENABLED", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def fake_redis() -> fakeredis.aioredis.FakeRedis:
     return fakeredis.aioredis.FakeRedis(decode_responses=True)

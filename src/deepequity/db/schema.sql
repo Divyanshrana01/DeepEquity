@@ -74,3 +74,39 @@ CREATE INDEX IF NOT EXISTS child_chunks_embedding_idx
 -- Day 4. Cheap to create now while the table is being defined.
 CREATE INDEX IF NOT EXISTS child_chunks_fts_idx
     ON child_chunks USING gin (to_tsvector('english', text));
+
+
+-- Long-term memory: every finished note, embedded, so a later run on the same ticker
+-- starts from what we already worked out instead of from nothing.
+--
+-- Separate from the chunks table on purpose. Chunks are things other people wrote and we
+-- retrieved. These are things this system concluded. Mixing them would let the agents
+-- cite their own past opinion as if it were a source document, which is exactly the kind
+-- of quiet circularity that makes a research tool untrustworthy.
+CREATE TABLE IF NOT EXISTS research_memory (
+    id          BIGSERIAL PRIMARY KEY,
+    ticker      TEXT        NOT NULL,
+    run_id      TEXT        NOT NULL,
+    -- what the planner decided to look at that time, so a later run can see whether it is
+    -- covering the same ground or genuinely new ground
+    focus       TEXT        NOT NULL,
+    summary     TEXT        NOT NULL,
+    key_risks   TEXT,
+    -- the overall confidence of that note. a past conclusion carried low confidence is
+    -- worth much less as a starting point, and the recall should be able to say so.
+    confidence  REAL,
+    embedding   vector(384),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One memory per run. Re-running the write for a run that already stored its note is a
+-- no-op rather than a duplicate, which matters because a resumed run can reach synthesis
+-- twice.
+CREATE UNIQUE INDEX IF NOT EXISTS research_memory_run_idx ON research_memory (run_id);
+
+-- Recall is always scoped to one ticker and usually wants the recent ones first.
+CREATE INDEX IF NOT EXISTS research_memory_ticker_idx
+    ON research_memory (ticker, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS research_memory_embedding_idx
+    ON research_memory USING hnsw (embedding vector_cosine_ops);
