@@ -50,6 +50,23 @@ def test_routing_follows_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     assert model_for(AgentRole.BEAR) == tuned.llm_fast_model
 
 
+#synthesis is the expensive call and the obvious one to cache, which is why leaving it out
+#needs a test holding it there. the note is the only part anyone reads, and a cached note
+#is one nobody reasoned about this time: returned confidently, with a fresh timestamp,
+#after the evidence underneath it moved. reusing the debate is a saving, reusing the
+#conclusion is a stale answer wearing a new date.
+def test_the_note_itself_is_never_served_from_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = Settings(semantic_cache_enabled=True)
+    monkeypatch.setattr("deepequity.agents.routing.get_settings", lambda: live)
+
+    assert is_cacheable(AgentRole.SYNTHESIS) is False
+    assert is_cacheable(AgentRole.BULL) is True
+    assert is_cacheable(AgentRole.BEAR) is True
+    assert is_cacheable(AgentRole.PLANNER) is True
+
+
 def test_cache_can_be_turned_off_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
     off = Settings(semantic_cache_enabled=False)
     monkeypatch.setattr("deepequity.agents.routing.get_settings", lambda: off)

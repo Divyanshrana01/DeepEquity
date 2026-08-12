@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from deepequity.agents import cache
-from deepequity.agents.routing import AgentRole, model_for
+from deepequity.agents.routing import AgentRole, is_cacheable, model_for
 from deepequity.api.auth import require_auth
 from deepequity.core.config import get_settings
 from deepequity.core.costs import price_for
@@ -62,7 +62,7 @@ async def get_stats(
                 model=model,
                 input_per_million_usd=price.input_per_million,
                 output_per_million_usd=price.output_per_million,
-                cacheable=role.value in settings.semantic_cache_roles,
+                cacheable=is_cacheable(role),
             )
         )
 

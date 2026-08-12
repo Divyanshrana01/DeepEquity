@@ -153,9 +153,15 @@ class Settings(BaseSettings):
     # next to an LLM call, but it should still not grow without limit.
     semantic_cache_max_entries: int = 200
     semantic_cache_scan_limit: int = 200
-    # Which roles may be served from cache. Everything, by default. Worth narrowing if a
-    # role ever needs to be genuinely fresh every time.
-    semantic_cache_roles: str = "planner,bull,bear,synthesis"
+    # Which roles may be served from cache. Synthesis is deliberately left out.
+    #
+    # It is the expensive call and the obvious one to cache, which is exactly why it's
+    # tempting and exactly why it's wrong here. The note is the only part anyone reads,
+    # and a cached note is one nobody reasoned about this time round: it would still be
+    # returned confidently, with a fresh timestamp, after the evidence underneath it had
+    # moved. Reusing the debate is a saving, reusing the conclusion is a stale answer
+    # wearing a new date. The debate is where most of the calls are anyway.
+    semantic_cache_roles: str = "planner,bull,bear"
 
     # Long-term memory. Finished notes are embedded into pgvector and recalled when the
     # same ticker comes round again, so a later run starts from what we already concluded
