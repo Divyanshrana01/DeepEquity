@@ -18,6 +18,9 @@ dependencies = [
     "psycopg-pool>=3.2",
     "fastembed>=0.8.0",
     "selectolax>=0.4.11",
+    "groq>=1.6.0",
+    "langgraph>=1.2.10",
+    "langgraph-checkpoint-redis>=0.5.1",
 ]
 
 [dependency-groups]
@@ -36,8 +39,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deepequity", "mcp_server"]
-# schema.sql isn't a .py file, so hatchling would skip it without this.
-artifacts = ["src/deepequity/db/*.sql"]
+# these aren't .py files, so hatchling would skip them without this. the prompts are
+# real artefacts the agents load at runtime, not documentation.
+artifacts = ["src/deepequity/db/*.sql", "src/deepequity/prompts/library/*.md"]
 
 [tool.ruff]
 line-length = 100

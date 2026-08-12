@@ -1,8 +1,9 @@
 import psycopg
 from fastapi import APIRouter, Response, status
 
+from deepequity.agents.checkpoint import checkpoint_backend
 from deepequity.core.config import get_settings
-from deepequity.core.redis_client import get_redis
+from deepequity.core.redis_client import aw, get_redis
 
 router = APIRouter(tags=["health"])
 
@@ -22,7 +23,7 @@ async def ready(response: Response) -> dict[str, str]:
 
     try:
         redis = get_redis()
-        await redis.ping()
+        await aw(redis.ping())
         checks["redis"] = "ok"
     except Exception as exc:  # noqa: BLE001 - we want to report any failure, not just specific ones
         checks["redis"] = f"error: {exc}"
@@ -37,5 +38,11 @@ async def ready(response: Response) -> dict[str, str]:
 
     if any(v != "ok" for v in checks.values()):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    #reported but deliberately not part of the pass/fail decision. losing checkpointing
+    #costs resumability, it doesn't make the service unable to answer, so it shouldn't
+    #take the container out of rotation. it does need to be visible somewhere other than
+    #a log line nobody is reading.
+    checks["checkpointer"] = checkpoint_backend()
 
     return checks

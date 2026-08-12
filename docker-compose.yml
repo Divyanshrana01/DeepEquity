@@ -16,7 +16,11 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    # redis-stack rather than plain redis, because the langgraph checkpointer stores its
+    # state as JSON documents and queries them with RediSearch. On plain redis those
+    # commands don't exist, checkpointing silently falls back to in-memory, and runs stop
+    # being resumable without anything obviously breaking.
+    image: redis/redis-stack-server:7.2.0-v11
     ports:
       - "6379:6379"
     healthcheck:

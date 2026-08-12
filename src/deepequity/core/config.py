@@ -93,6 +93,48 @@ class Settings(BaseSettings):
     reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = True
 
+    # LLM. Groq's free tier, which is an OpenAI-compatible API over open models.
+    groq_api_key: str = ""
+    # Two tiers, which is the model routing the plan calls for: the small one handles
+    # scoping and extraction where the job is mostly following instructions, the big one
+    # handles synthesis where the reasoning actually matters and a mistake is expensive.
+    # Both of these support strict json schema output, which the agents rely on.
+    llm_fast_model: str = "openai/gpt-oss-20b"
+    llm_strong_model: str = "openai/gpt-oss-120b"
+    # Low but not zero. Zero makes the debate agents repetitive, high makes them invent.
+    llm_temperature: float = 0.3
+    llm_max_output_tokens: int = 4096
+    llm_timeout_seconds: float = 90.0
+    llm_max_retries: int = 3
+
+    # How much evidence each debate agent is given.
+    #
+    # Two reasons this is capped rather than "send everything we found". The practical
+    # one: Groq's free tier allows 8000 tokens per minute, and bull and bear both fire in
+    # the same minute, so an unbounded evidence pool gets the request rejected outright.
+    # The better one: past a dozen or so passages the arguments get worse, not better,
+    # because the passages that actually matter are diluted by ones that merely matched.
+    # We keep the highest scoring ones.
+    max_evidence_chunks: int = 8
+    # Whether bull and bear argue at the same time.
+    #
+    # Concurrent is faster and was the original design, but each request runs to roughly
+    # 5000 tokens and the free tier allows 8000 per minute, so firing both together is
+    # over the limit before either finishes and both get rejected. Sequential fits, and a
+    # rate limited request that succeeds beats two parallel ones that fail. Worth turning
+    # back on with a paid tier.
+    debate_concurrent: bool = False
+    # Each passage is trimmed to this. Parent chunks run to 2000 characters and the tail
+    # end is usually the least relevant part, since the match was nearer the start.
+    max_evidence_chars_per_chunk: int = 1100
+
+    # Agent graph limits. These are what stop a debate running away, both in time and in
+    # money, and they're the answer to "how do you stop an agent looping forever".
+    max_debate_rounds: int = 2
+    # Hard ceiling per research run. When it's hit the graph stops and returns what it
+    # has rather than continuing to spend.
+    max_tokens_per_run: int = 120_000
+
     # Filings are megabytes of html. This is the ceiling on what the worker will pull
     # down for one document, a guard against a pathological file eating all our memory.
     max_document_bytes: int = 20_000_000
