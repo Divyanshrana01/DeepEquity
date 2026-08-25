@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepEquity Research Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper:      #EDF0F3;
+  --card:       #FFFFFF;
+  --ink:        #161C24;
+  --muted:      #5C6773;
+  --rule:       #D3DAE1;
+  --bull:       #B26A00;
+  --bear:       #5B4BC4;
+  --measured:   #0F7A6B;
+  --bull-wash:  #FBF1E2;
+  --bear-wash:  #EFEDFA;
+
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --serif: "Newsreader", Georgia, "Times New Roman", serif;
+
+  --gap: 1.5rem;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- shared utility type ---------------------------------------------- */
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mono { font-family: var(--mono); }
+
+/* ---- top bar ----------------------------------------------------------- */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  padding: 0.9rem 1.5rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+  margin-right: auto;
+}
+.wordmark span { color: var(--muted); font-weight: 400; }
+
+.bar form { display: flex; gap: 0.5rem; align-items: center; }
+
+input {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 2px;
+  width: 9rem;
+}
+input:focus-visible { outline: 2px solid var(--bear); outline-offset: 1px; }
+
+button {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--card);
+  border-radius: 2px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: #2B3542; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid var(--bear); outline-offset: 2px; }
+
+/* ---- page frame -------------------------------------------------------- */
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+.hidden { display: none !important; }
+
+/* ---- empty state ------------------------------------------------------- */
+
+.intro { max-width: 34rem; }
+.intro h1 {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: clamp(1.6rem, 4vw, 2.3rem);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0.6rem 0 1rem;
+}
+.intro p { color: var(--muted); margin: 0 0 0.8rem; }
+.intro .known { font-family: var(--mono); font-size: 0.8rem; color: var(--ink); }
+
+/* ---- credentials gate -------------------------------------------------- */
+
+.gate {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1.25rem;
+  margin-top: 2rem;
+  max-width: 26rem;
+}
+.gate p { font-size: 0.9rem; color: var(--muted); margin: 0.5rem 0 1rem; }
+.gate input { width: 100%; margin-bottom: 0.6rem; }
+
+/* ---- progress ---------------------------------------------------------- */
+
+.stages { list-style: none; padding: 0; margin: 2rem 0 0; max-width: 22rem; }
+.stages li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  padding: 0.5rem 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-left: 2px solid var(--rule);
+  padding-left: 1.1rem;
+}
+.stages li.done { color: var(--ink); border-left-color: var(--measured); }
+.stages li.active { color: var(--ink); border-left-color: var(--bull); }
+.stages li.active .tick::after { content: "running"; color: var(--bull); }
+.stages li.done .tick::after { content: "done"; color: var(--measured); }
+.tick { margin-left: auto; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* ---- note header ------------------------------------------------------- */
+
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.2rem; margin-bottom: 2rem; }
+.masthead h1 {
+  font-family: var(--mono);
+  font-size: clamp(2rem, 6vw, 3.2rem);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  margin: 0.3rem 0 0.5rem;
+}
+.verdict { font-size: 1.15rem; color: var(--ink); margin: 0; max-width: 40rem; }
+.verdict b { font-weight: 600; }
+
+/* ---- confidence -------------------------------------------------------- */
+
+.confidence { margin: 2.5rem 0; }
+.conf-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr 3rem 5rem;
+  align-items: center;
+  gap: 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 0.3rem 0;
+}
+.conf-row .track { height: 6px; background: var(--rule); border-radius: 1px; }
+.conf-row .fill { height: 100%; background: var(--ink); border-radius: 1px; }
+.conf-row .val { text-align: right; font-weight: 500; }
+.conf-row .src { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.conf-row.measured .fill { background: var(--measured); }
+.conf-row.overall { border-top: 1px solid var(--rule); margin-top: 0.5rem; padding-top: 0.7rem; font-weight: 600; }
+.conf-row.overall .fill { background: var(--ink); }
+
+/* ---- prose ------------------------------------------------------------- */
+
+.summary { font-size: 1.08rem; max-width: 42rem; }
+
+.section-rule {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 3.5rem 0 2rem;
+}
+.section-rule::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+/* ---- the debate spine -------------------------------------------------- */
+
+.spine { position: relative; }
+.spine::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+
+.side-labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+.side-labels .bull-label { text-align: right; color: var(--bull); }
+.side-labels .bear-label { color: var(--bear); }
+
+.agreement {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.9rem 1.1rem;
+  margin: 0 auto 0.8rem;
+  max-width: 34rem;
+  font-size: 0.98rem;
+}
+.agreement .eyebrow { display: block; margin-bottom: 0.3rem; }
+
+.dispute {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 1.6rem;
+}
+.dispute .topic {
+  grid-column: 1 / -1;
+  text-align: center;
+  background: var(--paper);
+  position: relative;
+  z-index: 1;
+  padding: 0 0.8rem;
+  justify-self: center;
+  margin-bottom: 0.7rem;
+}
+.dispute .pos {
+  padding: 0.9rem 1.1rem;
+  border-radius: 3px;
+  font-size: 0.95rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+}
+.dispute .pos.bull { border-left: 3px solid var(--bull); }
+.dispute .pos.bear { border-right: 3px solid var(--bear); }
+.dispute.favours-bull .pos.bull { background: var(--bull-wash); }
+.dispute.favours-bear .pos.bear { background: var(--bear-wash); }
+
+.tips {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 0.6rem;
+}
+.tips b { font-weight: 500; }
+.tips .to-bull { color: var(--bull); }
+.tips .to-bear { color: var(--bear); }
+
+/* ---- claims and citations ---------------------------------------------- */
+
+.claim { border-bottom: 1px solid var(--rule); padding: 1rem 0; }
+.claim:last-child { border-bottom: none; }
+.claim summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+}
+.claim summary::-webkit-details-marker { display: none; }
+.claim summary:focus-visible { outline: 2px solid var(--bear); outline-offset: 3px; }
+.claim .refs {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--measured);
+  white-space: nowrap;
+  margin-left: auto;
+}
+.claim .refs.none { color: #A8391F; }
+.quote {
+  margin: 0.8rem 0 0 0;
+  padding: 0.7rem 0 0.7rem 1rem;
+  border-left: 2px solid var(--measured);
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+.quote .cite { font-family: var(--mono); font-size: 0.7rem; color: var(--measured); display: block; margin-bottom: 0.25rem; }
+
+.risks { padding-left: 1.1rem; }
+.risks li { margin-bottom: 0.4rem; }
+
+/* ---- telemetry footer -------------------------------------------------- */
+
+.telemetry {
+  margin-top: 4rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 1.2rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.telemetry table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+.telemetry th, .telemetry td { text-align: left; padding: 0.28rem 0.6rem 0.28rem 0; font-weight: 400; }
+.telemetry th { color: var(--ink); font-weight: 500; border-bottom: 1px solid var(--rule); }
+.telemetry td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.telemetry .cached { color: var(--measured); }
+.totals b { color: var(--ink); font-weight: 600; }
+
+.disclaimer { margin-top: 2rem; font-size: 0.8rem; color: var(--muted); max-width: 40rem; }
+
+/* ---- messages ---------------------------------------------------------- */
+
+.notice {
+  border-left: 3px solid #A8391F;
+  background: var(--card);
+  padding: 0.9rem 1.1rem;
+  margin-top: 1.5rem;
+  font-size: 0.92rem;
+}
+.notice .eyebrow { display: block; margin-bottom: 0.3rem; color: #A8391F; }
+
+@media (max-width: 40rem) {
+  .spine::before { display: none; }
+  .dispute, .side-labels { grid-template-columns: 1fr; gap: 0.6rem; }
+  .side-labels .bull-label { text-align: left; }
+  .dispute .pos.bear { border-right: 1px solid var(--rule); border-left: 3px solid var(--bear); }
+  .conf-row { grid-template-columns: 7rem 1fr 2.6rem; }
+  .conf-row .src { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wordmark">DeepEquity <span>/ research desk</span></div>
+  <form id="research-form">
+    <label class="eyebrow" for="ticker">Ticker</label>
+    <input id="ticker" name="ticker" value="AAPL" maxlength="10" autocomplete="off" spellcheck="false">
+    <button id="run-btn" type="submit">Research</button>
+  </form>
+</header>
+
+<main>
+  <!-- credentials -->
+  <section id="gate" class="gate hidden">
+    <span class="eyebrow">Sign in</span>
+    <p>The API is authenticated. Enter the demo client secret from your <span class="mono">.env</span> to get a token.</p>
+    <input id="client-id" value="demo" autocomplete="username" aria-label="Client id">
+    <input id="client-secret" type="password" placeholder="client secret" autocomplete="current-password" aria-label="Client secret">
+    <button id="gate-btn" type="button">Get token</button>
+    <div id="gate-error"></div>
+  </section>
+
+  <!-- empty state -->
+  <section id="intro" class="intro">
+    <span class="eyebrow">Automated equity research</span>
+    <h1>Two analysts read the same filings and argue about them.</h1>
+    <p>One builds the case for. One builds the case against. Both work only from what the filings actually say, and every claim points back at the passage it came from.</p>
+    <p class="known">Filings loaded: <span id="known-tickers">checking…</span></p>
+  </section>
+
+  <!-- progress -->
+  <section id="progress" class="hidden">
+    <span class="eyebrow">Researching <span id="progress-ticker"></span></span>
+    <ol class="stages" id="stages"></ol>
+  </section>
+
+  <!-- errors -->
+  <div id="error-slot"></div>
+
+  <!-- result -->
+  <article id="note" class="hidden"></article>
+</main>
+
+<script>
+const STAGES = ["planning", "retrieving", "debating", "synthesising", "complete"];
+const store = window.sessionStorage;
+let pollTimer = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function show(el, on) { el.classList.toggle("hidden", !on); }
+
+function notice(title, body) {
+  $("error-slot").innerHTML =
+    `<div class="notice"><span class="eyebrow">${esc(title)}</span>${esc(body)}</div>`;
+}
+function clearNotice() { $("error-slot").innerHTML = ""; }
+
+// ---- auth ---------------------------------------------------------------
+
+function token() { return store.getItem("de_token"); }
+
+async function getToken() {
+  const secret = $("client-secret").value.trim();
+  if (!secret) { notice("Secret required", "Enter the demo client secret to continue."); return; }
+  const res = await fetch("/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: $("client-id").value.trim(), client_secret: secret }),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))).detail || res.statusText;
+    notice("Could not sign in", detail);
+    return;
+  }
+  const body = await res.json();
+  store.setItem("de_token", body.access_token);
+  clearNotice();
+  show($("gate"), false);
+  loadKnownTickers();
+}
+
+// Every call goes through here so a expired token surfaces as the sign-in panel
+// rather than as a silent failure somewhere in the middle of a run.
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token()}`, ...(options.headers || {}) },
+  });
+  if (res.status === 401) {
+    store.removeItem("de_token");
+    show($("gate"), true);
+    throw new Error("Session expired. Sign in again.");
+  }
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))).detail || res.statusText;
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+// ---- what we can actually research --------------------------------------
+
+async function loadKnownTickers() {
+  if (!token()) return;
+  try {
+    const body = await api("/corpus");
+    $("known-tickers").textContent = body.tickers.length
+      ? body.tickers.map((t) => `${t.ticker} (${t.chunks} passages)`).join("  ·  ")
+      : "none yet, ingest a filing first";
+  } catch {
+    $("known-tickers").textContent = "unavailable";
+  }
+}
+
+// ---- running a research pass --------------------------------------------
+
+function renderStages(current) {
+  const at = STAGES.indexOf(current);
+  $("stages").innerHTML = STAGES.slice(0, 4).map((s, i) => {
+    const cls = at > i || current === "complete" ? "done" : at === i ? "active" : "";
+    return `<li class="${cls}">${s}<span class="tick"></span></li>`;
+  }).join("");
+}
+
+async function startResearch(event) {
+  event.preventDefault();
+  if (!token()) { show($("gate"), true); return; }
+
+  const ticker = $("ticker").value.trim().toUpperCase();
+  if (!ticker) return;
+
+  clearNotice();
+  clearInterval(pollTimer);
+  $("run-btn").disabled = true;
+  show($("intro"), false);
+  show($("note"), false);
+  show($("progress"), true);
+  $("progress-ticker").textContent = ticker;
+  renderStages("planning");
+
+  try {
+    const accepted = await api("/research", { method: "POST", body: JSON.stringify({ ticker }) });
+    poll(accepted.run_id);
+  } catch (err) {
+    finish();
+    notice("Could not start the run", err.message);
+  }
+}
+
+function poll(runId) {
+  // Three seconds. A cold run takes minutes and a warm one under a minute, and
+  // polling faster than the stages change just makes noise.
+  pollTimer = setInterval(async () => {
+    let run;
+    try {
+      run = await api(`/research/${runId}`);
+    } catch (err) {
+      finish();
+      notice("Lost track of the run", err.message);
+      return;
+    }
+    renderStages(run.stage);
+    if (run.status === "complete") { finish(); render(run); }
+    else if (run.status === "failed") { finish(); notice("The run failed", run.error || "No reason given."); }
+  }, 3000);
+}
+
+function finish() {
+  clearInterval(pollTimer);
+  $("run-btn").disabled = false;
+  show($("progress"), false);
+}
+
+// ---- rendering the note --------------------------------------------------
+
+function confidenceBlock(c) {
+  // evidence_strength and source_diversity are computed from the note itself rather
+  // than asked for, and saying so is the point: a model grading its own work grades
+  // generously, and the reader deserves to know which numbers are which.
+  const rows = [
+    ["evidence", c.evidence_strength, "measured"],
+    ["reasoning", c.reasoning_consistency, "model"],
+    ["source spread", c.source_diversity, "measured"],
+    ["freshness", c.data_freshness, "model"],
+  ];
+  const row = (label, value, src, extra = "") => `
+    <div class="conf-row ${src === "measured" ? "measured" : ""} ${extra}">
+      <span>${label}</span>
+      <span class="track"><span class="fill" style="width:${Math.round(value * 100)}%"></span></span>
+      <span class="val">${value.toFixed(2)}</span>
+      <span class="src">${src}</span>
+    </div>`;
+  return `<div class="confidence">
+    <div class="section-rule"><span class="eyebrow">Confidence</span></div>
+    ${rows.map(([l, v, s]) => row(l, v, s)).join("")}
+    ${row("overall", c.overall, "capped", "overall")}
+  </div>`;
+}
+
+function disputeBlock(d) {
+  const favours = (d.better_supported || "neither").toLowerCase();
+  const tips = favours === "bull"
+    ? `evidence favours <b class="to-bull">bull</b>`
+    : favours === "bear"
+    ? `evidence favours <b class="to-bear">bear</b>`
+    : `evidence favours <b>neither</b>`;
+  return `<div class="dispute favours-${esc(favours)}">
+    <span class="eyebrow topic">${esc(d.topic)}</span>
+    <div class="pos bull">${esc(d.bull_position)}</div>
+    <div class="pos bear">${esc(d.bear_position)}</div>
+    <div class="tips">${tips}</div>
+  </div>`;
+}
+
+function claimBlock(claim) {
+  const cites = claim.citations || [];
+  const refs = cites.length
+    ? `<span class="refs">${cites.map((c) => `[${c.chunk_id}]`).join(" ")}</span>`
+    : `<span class="refs none">unsupported</span>`;
+  const quotes = cites.map((c) => `
+    <blockquote class="quote"><span class="cite">chunk ${c.chunk_id} · document ${c.document_id}</span>${esc(c.quote)}</blockquote>`
+  ).join("");
+  return `<details class="claim">
+    <summary><span>${esc(claim.statement)}</span>${refs}</summary>
+    ${quotes || `<p class="quote">Nothing in the filings was cited for this. Read it as an assertion, not a finding.</p>`}
+  </details>`;
+}
+
+function telemetryBlock(run) {
+  const rows = (run.costs || []).map((c) => `
+    <tr>
+      <td>${esc(c.agent)}</td>
+      <td>${esc(c.model)}</td>
+      <td class="num">${(c.prompt_tokens + c.completion_tokens).toLocaleString()}</td>
+      <td class="num">${c.cached ? `<span class="cached">cached</span>` : "$" + c.cost_usd.toFixed(6)}</td>
+    </tr>`).join("");
+  const saved = run.saved_usd > 0 ? ` · <b>$${run.saved_usd.toFixed(6)}</b> saved by cache` : "";
+  return `<footer class="telemetry">
+    <span class="eyebrow">What this run cost</span>
+    <table>
+      <thead><tr><th>agent</th><th>model</th><th class="num">tokens</th><th class="num">cost</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="totals">${run.rounds} debate rounds · ${run.tokens_used.toLocaleString()} tokens ·
+      <b>$${run.cost_usd.toFixed(6)}</b>${saved} · finished as <b>${esc(run.stop_reason || "complete")}</b></p>
+  </footer>`;
+}
+
+function render(run) {
+  const note = run.note;
+  const disputes = note.disagreements || [];
+  const agreements = note.agreements || [];
+  const claims = note.supporting_claims || [];
+  const unsupported = claims.filter((c) => !(c.citations || []).length).length;
+
+  const verdict = disputes.length
+    ? `The two analysts agreed on <b>${agreements.length}</b> ${agreements.length === 1 ? "point" : "points"} and split on <b>${disputes.length}</b>.`
+    : `The two analysts found nothing to argue about.`;
+
+  $("note").innerHTML = `
+    <div class="masthead">
+      <span class="eyebrow">Research note</span>
+      <h1>${esc(note.ticker)}</h1>
+      <p class="verdict">${verdict}</p>
+    </div>
+
+    <p class="summary">${esc(note.summary)}</p>
+
+    ${confidenceBlock(note.confidence)}
+
+    <div class="section-rule"><span class="eyebrow">The debate</span></div>
+    <div class="spine">
+      <div class="side-labels">
+        <span class="eyebrow bull-label">Bull</span>
+        <span class="eyebrow bear-label">Bear</span>
+      </div>
+      ${agreements.map((a) => `<div class="agreement"><span class="eyebrow">Both sides</span>${esc(a)}</div>`).join("")}
+      ${disputes.map(disputeBlock).join("")}
+    </div>
+
+    <div class="section-rule">
+      <span class="eyebrow">What this rests on</span>
+      <span class="eyebrow">${claims.length - unsupported} of ${claims.length} cited</span>
+    </div>
+    ${claims.map(claimBlock).join("") || `<p class="summary">No claims were carried through.</p>`}
+
+    ${(note.key_risks || []).length ? `
+      <div class="section-rule"><span class="eyebrow">Key risks</span></div>
+      <ul class="risks">${note.key_risks.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+
+    ${telemetryBlock(run)}
+    <p class="disclaimer">${esc(note.disclaimer)}</p>`;
+
+  show($("note"), true);
+}
+
+// ---- wiring --------------------------------------------------------------
+
+$("research-form").addEventListener("submit", startResearch);
+$("gate-btn").addEventListener("click", getToken);
+$("client-secret").addEventListener("keydown", (e) => { if (e.key === "Enter") getToken(); });
+
+if (token()) loadKnownTickers(); else show($("gate"), true);
+</script>
+</body>
+</html>

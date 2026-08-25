@@ -97,3 +97,53 @@ def test_status_endpoint_404s_for_unknown_document(
     response = client.get("/ingest/999", headers=_auth_header())
 
     assert response.status_code == 404
+
+
+#a stand-in for the postgres pool that hands back fixed rows. the corpus endpoint is a
+#single query, so what's worth testing is the shape it returns and the auth on it, not
+#that postgres can group by.
+def _pool_returning(rows: list[dict]):
+    class Cursor:
+        async def execute(self, *_a, **_k): return None
+        async def fetchall(self): return rows
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_a): return False
+
+    class Conn:
+        def cursor(self, **_k): return Cursor()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_a): return False
+
+    class Pool:
+        def connection(self): return Conn()
+
+    async def get_pool(): return Pool()
+    return get_pool
+
+
+
+# --- /corpus ---------------------------------------------------------------------------
+
+
+async def test_corpus_needs_auth(client: TestClient) -> None:
+    assert client.get("/corpus").status_code == 401
+
+
+async def test_corpus_lists_what_can_be_researched(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Researching a ticker whose filings were never ingested doesn't fail loudly, it
+    # produces a note built on no evidence that reads like a real answer. This endpoint
+    # is how a caller checks first, so it needs to report the counts it claims to.
+    import deepequity.api.routes.ingest as ingest_route
+
+    rows = [
+        {"ticker": "AAPL", "documents": 1, "chunks": 420},
+        {"ticker": "MSFT", "documents": 2, "chunks": 433},
+    ]
+    monkeypatch.setattr(ingest_route, "get_pool", _pool_returning(rows))
+
+    body = client.get("/corpus", headers=_auth_header()).json()
+
+    assert [t["ticker"] for t in body["tickers"]] == ["AAPL", "MSFT"]
+    assert body["tickers"][0]["chunks"] == 420

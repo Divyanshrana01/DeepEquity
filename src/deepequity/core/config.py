@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    # Credentials for the /token endpoint, which is how the demo page and any script
+    # gets a JWT without running python. Blank secret disables the endpoint outright:
+    # a working default credential is the sort of thing that gets deployed and forgotten,
+    # and an auth endpoint that hands tokens to anyone is worse than not having one.
+    demo_client_id: str = "demo"
+    demo_client_secret: str = ""
+
     # Rate limiting: N requests per window_seconds, per API key/IP
     rate_limit_requests: int = 60
     rate_limit_window_seconds: int = 60

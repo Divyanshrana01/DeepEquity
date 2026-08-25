@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 
 from deepequity.api.logging_middleware import RequestLoggingMiddleware
 from deepequity.api.rate_limit import RateLimitMiddleware
@@ -10,11 +12,14 @@ from deepequity.api.routes.ingest import router as ingest_router
 from deepequity.api.routes.research import router as research_router
 from deepequity.api.routes.search import router as search_router
 from deepequity.api.routes.stats import router as stats_router
+from deepequity.api.routes.token import router as token_router
 from deepequity.core.config import get_settings
 from deepequity.core.db import close_pool, run_migrations
 from deepequity.core.logging import configure_logging
 from deepequity.core.redis_client import close_redis_pool
 from deepequity.ingestion.events import ensure_group
+
+_STATIC = Path(__file__).parent / "static"
 
 
 #runs once at startup (logging, db tables, consumer group) and once at shutdown (close
@@ -49,6 +54,15 @@ def create_app() -> FastAPI:
     app.include_router(search_router)
     app.include_router(research_router)
     app.include_router(stats_router)
+    app.include_router(token_router)
+
+    #the demo page. one static file with its css and js inline, served from the api
+    #itself rather than a separate frontend build, because a node toolchain in this repo
+    #would be more machinery than the page is worth. it talks to the same public
+    #endpoints anything else would.
+    @app.get("/", include_in_schema=False)
+    async def demo_page() -> FileResponse:
+        return FileResponse(_STATIC / "index.html")
 
     return app
 

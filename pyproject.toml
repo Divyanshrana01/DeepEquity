@@ -41,7 +41,11 @@ build-backend = "hatchling.build"
 packages = ["src/deepequity", "mcp_server"]
 # these aren't .py files, so hatchling would skip them without this. the prompts are
 # real artefacts the agents load at runtime, not documentation.
-artifacts = ["src/deepequity/db/*.sql", "src/deepequity/prompts/library/*.md"]
+artifacts = [
+    "src/deepequity/db/*.sql",
+    "src/deepequity/prompts/library/*.md",
+    "src/deepequity/api/static/*.html",
+]
 
 [tool.ruff]
 line-length = 100
