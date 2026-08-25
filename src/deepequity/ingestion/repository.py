@@ -5,7 +5,10 @@ from typing import Any
 from psycopg.rows import dict_row
 
 from deepequity.core.db import get_pool
+from deepequity.core.logging import get_logger
 from deepequity.ingestion.models import Document, DocumentStatus
+
+logger = get_logger("deepequity.ingestion.repository")
 
 _COLUMNS = "id, ticker, doc_type, source_ref, source_url, raw_text, status, attempts, last_error"
 
@@ -131,3 +134,36 @@ async def reset_to_pending(document_id: int, error: str) -> None:
             "UPDATE documents SET status = %s, last_error = %s, updated_at = now() WHERE id = %s",
             (DocumentStatus.PENDING, error[:2000], document_id),
         )
+
+
+#How many searchable chunks a document actually has.
+#
+#Used to tell a document that finished from one that finished with nothing, which the
+#status column on its own cannot do.
+async def searchable_chunk_count(document_id: int) -> int:
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT count(*) FROM child_chunks "
+                "WHERE document_id = %s AND embedding IS NOT NULL",
+                (document_id,),
+            )
+            row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+#Puts a document back in the queue's path after it finished badly.
+#
+#Separate from reset_to_pending, which exists for a retry that's already in flight. This
+#one is for a deliberate re-ingest of something that ended up unusable, so the attempt
+#count goes back to zero and the old error is cleared rather than kept.
+async def reset_for_reingest(document_id: int) -> None:
+    pool = await get_pool()
+    async with pool.connection() as conn:
+        await conn.execute(
+            "UPDATE documents SET status = 'pending', attempts = 0, last_error = NULL, "
+            "updated_at = now() WHERE id = %s",
+            (document_id,),
+        )
+    logger.info("document_reset_for_reingest", document_id=document_id)

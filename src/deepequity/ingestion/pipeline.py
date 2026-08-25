@@ -46,6 +46,17 @@ async def process_document(document: Document) -> None:
 
     parent_count, child_count = await replace_document_chunks(document.id, parents, vectors)
 
+    #children are the searchable unit, parents are only the context we hand back once a
+    #child matches. a document that produced parents but no children is not a partial
+    #success, it's invisible to every search while being marked complete, which is worse
+    #than a visible failure because nothing ever prompts anyone to look at it. observed
+    #live: one filing sat as complete with zero chunks and no re-ingest could dislodge it.
+    if child_count == 0:
+        raise PermanentIngestionError(
+            f"document {document.id} produced {parent_count} parents but no searchable "
+            "chunks, so nothing about it can ever be found"
+        )
+
     logger.info(
         "document_processed",
         document_id=document.id,

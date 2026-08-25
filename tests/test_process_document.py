@@ -111,3 +111,21 @@ async def test_html_that_cleans_to_nothing_is_permanent(
 
     with pytest.raises(PermanentIngestionError, match="no text"):
         await pipeline.process_document(_document())
+
+
+async def test_a_document_with_no_searchable_chunks_is_a_failure(
+    monkeypatch: pytest.MonkeyPatch, wired: FakeChunkStore
+) -> None:
+    # Children are the searchable unit. A document that writes parents and no children is
+    # invisible to every search while being marked complete, and nothing ever prompts
+    # anyone to look at it. Observed live: one filing sat like that and no re-ingest could
+    # dislodge it, because being complete is exactly what made it look fine.
+    async def wrote_nothing_searchable(
+        document_id: int, parents: Any, vectors: Any
+    ) -> tuple[int, int]:
+        return len(parents), 0
+
+    monkeypatch.setattr(pipeline, "replace_document_chunks", wrote_nothing_searchable)
+
+    with pytest.raises(PermanentIngestionError, match="no searchable chunks"):
+        await pipeline.process_document(_document())

@@ -19,15 +19,25 @@ _FILING_OK: dict[str, Any] = {
 # Minimal repository stand-in: remembers whether a document already exists and what got
 # inserted, which is all the service layer touches.
 class FakeRepository:
-    def __init__(self, existing: Document | None = None) -> None:
+    def __init__(self, existing: Document | None = None, chunks: int = 400) -> None:
         self.existing = existing
         self.created: list[dict[str, Any]] = []
         self.create_returns_new = True
+        #how many searchable chunks the existing document has. defaults to a healthy
+        #number, because "already ingested" normally means the document actually worked.
+        self.chunks = chunks
+        self.reset_ids: list[int] = []
 
     async def find_by_source(
         self, ticker: str, doc_type: str, source_ref: str
     ) -> Document | None:
         return self.existing
+
+    async def searchable_chunk_count(self, document_id: int) -> int:
+        return self.chunks
+
+    async def reset_for_reingest(self, document_id: int) -> None:
+        self.reset_ids.append(document_id)
 
     async def create_pending(self, **kwargs: Any) -> tuple[Document, bool]:
         self.created.append(kwargs)
@@ -120,4 +130,72 @@ async def test_failed_fetch_raises_permanent(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(PermanentIngestionError, match="Unknown ticker"):
         await service.request_ingestion("NOPE", "10-K")
 
+    assert evts.published == []
+
+
+async def test_a_complete_but_empty_document_is_queued_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Observed live: a filing sat as complete with zero chunks. It was invisible to every
+    # search, and because idempotency only asked "have we seen this accession number", no
+    # re-ingest could ever dislodge it. Being marked complete was what made it permanent.
+    empty = Document(
+        id=7,
+        ticker="MSFT",
+        doc_type="10-K",
+        source_ref="0000320193-24-000123",
+        status=DocumentStatus.COMPLETE,
+    )
+    repo, evts = FakeRepository(existing=empty, chunks=0), FakeEvents()
+    _patch(monkeypatch, repo, evts, _FILING_OK)
+
+    result = await service.request_ingestion("MSFT", "10-K")
+
+    assert result.already_ingested is False
+    assert result.status == DocumentStatus.PENDING
+    assert repo.reset_ids == [7]
+    # the same document goes back on the queue, no duplicate row
+    assert [e.document_id for e in evts.published] == [7]
+    assert repo.created == []
+
+
+async def test_a_failed_document_gets_another_go_when_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Re-requesting a filing is a deliberate act, so a previous failure shouldn't be the
+    # end of it. This is the manual retry path.
+    failed = Document(
+        id=8,
+        ticker="TSLA",
+        doc_type="10-K",
+        source_ref="0000320193-24-000123",
+        status=DocumentStatus.FAILED,
+    )
+    repo, evts = FakeRepository(existing=failed, chunks=0), FakeEvents()
+    _patch(monkeypatch, repo, evts, _FILING_OK)
+
+    result = await service.request_ingestion("TSLA", "10-K")
+
+    assert result.already_ingested is False
+    assert repo.reset_ids == [8]
+
+
+async def test_a_document_still_in_flight_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Nothing to fix yet and re-queueing would duplicate work the worker is already doing.
+    in_flight = Document(
+        id=9,
+        ticker="NVDA",
+        doc_type="10-K",
+        source_ref="0000320193-24-000123",
+        status=DocumentStatus.PROCESSING,
+    )
+    repo, evts = FakeRepository(existing=in_flight, chunks=0), FakeEvents()
+    _patch(monkeypatch, repo, evts, _FILING_OK)
+
+    result = await service.request_ingestion("NVDA", "10-K")
+
+    assert result.already_ingested is True
+    assert repo.reset_ids == []
     assert evts.published == []
