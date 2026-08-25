@@ -23,6 +23,16 @@ services:
     image: redis/redis-stack-server:7.2.0-v11
     ports:
       - "6379:6379"
+    # Write to disk, and keep the disk between container rebuilds.
+    #
+    # Redis holds two things worth keeping: the semantic cache and the langgraph
+    # checkpoints. Without a volume, `docker compose up --build` quietly takes both with
+    # it. Caught doing exactly that: a warmed cache went back to zero hits after a
+    # rebuild, and it looked like a caching bug rather than a missing volume. Losing the
+    # checkpoints is the worse half, since resumability is the whole reason they exist.
+    command: redis-stack-server --appendonly yes
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -83,3 +93,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
